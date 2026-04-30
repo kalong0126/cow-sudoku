@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#edf4fb">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="小牛数独">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <title>小牛数独</title>
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" href="icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="icon.svg">
+    <link rel="stylesheet" href="styles.css">
+    <script defer src="app.js"></script>
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="top-panel" aria-label="游戏信息">
+        <div class="level-row">
+          <span class="level-title">小牛数独</span>
+          <button class="new-game-button" id="newGameButton" type="button">新局</button>
+        </div>
+
+        <div class="status-row">
+          <div class="pill">
+            <span class="pill-label">棋盘</span>
+            <strong id="sizeBadge">- x -</strong>
+          </div>
+          <div class="pill">
+            <span class="pill-label">难度</span>
+            <strong id="difficultyBadge">生成中</strong>
+          </div>
+          <div class="pill hearts" id="livesDisplay" aria-label="生命值">❤ ❤ ❤</div>
+          <div class="pill">
+            <span class="pill-label">剩余</span>
+            <strong id="remainingCount">0</strong>
+          </div>
+        </div>
+
+        <div class="rule-strip" aria-label="规则">
+          <div>每种颜色 1 只小牛</div>
+          <div>每行每列均有且仅有 1 只小牛</div>
+          <div>小牛不能相邻</div>
+        </div>
+      </section>
+
+      <section class="board-wrap" aria-label="游戏棋盘">
+        <div class="message" id="message" role="status">单击标叉，双击确认小牛，拖动连续标叉。</div>
+        <div class="board" id="board" role="grid" aria-label="小牛数独棋盘"></div>
+      </section>
+    </main>
+  </body>
+</html>

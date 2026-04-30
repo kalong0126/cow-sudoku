@@ -1,0 +1,19 @@
+{
+  "name": "小牛数独",
+  "short_name": "小牛数独",
+  "description": "适合手机和平板游玩的 n*n 小牛数独游戏。",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#edf4fb",
+  "theme_color": "#edf4fb",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
