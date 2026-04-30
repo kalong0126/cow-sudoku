@@ -1,6 +1,6 @@
 "use strict";
 
-const CACHE_NAME = "cow-sudoku-v1";
+const CACHE_NAME = "cow-sudoku-v2";
 const ASSETS = [
   "./",
   "./index.html",

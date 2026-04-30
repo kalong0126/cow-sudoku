@@ -683,10 +683,43 @@ const CowSudokuCore = (() => {
     if (count <= 1) {
       return "困难";
     }
-    if (count <= 3) {
+    if (count === 2) {
       return "中等";
     }
     return "简单";
+  }
+
+  function normalizeDifficulty(value) {
+    if (value === "easy" || value === "medium" || value === "hard") {
+      return value;
+    }
+    return "random";
+  }
+
+  function chooseDifficulty(value, rng = Math.random) {
+    const normalized = normalizeDifficulty(value);
+    if (normalized !== "random") {
+      return normalized;
+    }
+    const roll = rng();
+    if (roll < 0.34) {
+      return "easy";
+    }
+    if (roll < 0.68) {
+      return "medium";
+    }
+    return "hard";
+  }
+
+  function difficultyMatches(targetDifficulty, logic) {
+    const openings = logic.initialLogicalBreakthroughs;
+    if (targetDifficulty === "easy") {
+      return openings >= 3;
+    }
+    if (targetDifficulty === "medium") {
+      return openings === 2;
+    }
+    return openings === 1;
   }
 
   function buildSeedRegions(n, cows, softOpenings) {
@@ -963,8 +996,18 @@ const CowSudokuCore = (() => {
     return null;
   }
 
-  function generatePuzzle(size, rng = Math.random) {
+  function finishPuzzle(puzzle, logic) {
+    puzzle.difficulty = difficultyFromBreakthroughs(logic.initialLogicalBreakthroughs);
+    puzzle.initialBreakthroughs = logic.initialLogicalBreakthroughs;
+    puzzle.colorBreakthroughs = logic.initialBreakthroughs;
+    puzzle.multiSourcePlacements = logic.multiSourcePlacements;
+    puzzle.logicSteps = logic.steps.length;
+    return puzzle;
+  }
+
+  function generatePuzzle(size, rng = Math.random, difficulty = "random") {
     const requestedSize = size || randomInt(6, 9, rng);
+    const targetDifficulty = chooseDifficulty(difficulty, rng);
     const sizes = size
       ? [requestedSize]
       : [
@@ -1009,12 +1052,49 @@ const CowSudokuCore = (() => {
         if (!validateRegionSizePolicy(puzzle).ok) {
           continue;
         }
+        if (!difficultyMatches(targetDifficulty, logic)) {
+          continue;
+        }
 
-        puzzle.difficulty = difficultyFromBreakthroughs(logic.initialBreakthroughs);
-        puzzle.initialBreakthroughs = logic.initialBreakthroughs;
-        puzzle.multiSourcePlacements = logic.multiSourcePlacements;
-        puzzle.logicSteps = logic.steps.length;
-        return puzzle;
+        return finishPuzzle(puzzle, logic);
+      }
+    }
+
+    return generatePuzzleWithFallback(sizes, rng);
+  }
+
+  function generatePuzzleWithFallback(sizes, rng = Math.random) {
+    for (const n of sizes) {
+      for (let attempt = 0; attempt < 260; attempt += 1) {
+        const cows = generateCowPositions(n, rng);
+        const regions = generateStructuredRegions(n, cows, rng);
+        if (!regions) {
+          continue;
+        }
+
+        const colors = shuffle(COLOR_POOL, rng).slice(0, n);
+        const puzzle = { n, cows, regions, colors };
+        const validation = validatePuzzle(puzzle);
+
+        if (!validation.ok) {
+          continue;
+        }
+        if (countSolutions(puzzle, 2) !== 1) {
+          continue;
+        }
+
+        const logic = analyzeLogic(puzzle);
+        if (!logic.solved || logic.initialLogicalBreakthroughs < 1) {
+          continue;
+        }
+        if (logic.multiSourcePlacements < Math.max(1, n - 4)) {
+          continue;
+        }
+        if (!validateRegionSizePolicy(puzzle).ok) {
+          continue;
+        }
+
+        return finishPuzzle(puzzle, logic);
       }
     }
 
@@ -1050,6 +1130,7 @@ if (typeof window !== "undefined") {
   window.addEventListener("DOMContentLoaded", () => {
     const board = document.querySelector("#board");
     const newGameButton = document.querySelector("#newGameButton");
+    const difficultySelect = document.querySelector("#difficultySelect");
     const sizeBadge = document.querySelector("#sizeBadge");
     const difficultyBadge = document.querySelector("#difficultyBadge");
     const livesDisplay = document.querySelector("#livesDisplay");
@@ -1071,7 +1152,11 @@ if (typeof window !== "undefined") {
       setLoading(true);
       window.setTimeout(() => {
         try {
-          state.puzzle = CowSudokuCore.generatePuzzle();
+          state.puzzle = CowSudokuCore.generatePuzzle(
+            null,
+            Math.random,
+            difficultySelect.value
+          );
           state.cells = Array.from({ length: state.puzzle.n }, () =>
             Array(state.puzzle.n).fill("empty")
           );
@@ -1340,6 +1425,7 @@ if (typeof window !== "undefined") {
     });
 
     newGameButton.addEventListener("click", startGame);
+    difficultySelect.addEventListener("change", startGame);
 
     window.CowSudokuGame = {
       newGame: startGame,

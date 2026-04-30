@@ -78,6 +78,33 @@ button {
   cursor: pointer;
 }
 
+.difficulty-control {
+  min-height: 42px;
+  padding: 4px 8px 4px 14px;
+  border: 2px solid #d4e4f1;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 2px 8px rgba(81, 120, 153, 0.15);
+  color: var(--muted);
+  font-size: clamp(14px, 3vw, 18px);
+  font-weight: 900;
+}
+
+.difficulty-control select {
+  min-height: 32px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 28px 0 10px;
+  color: var(--ink);
+  background: #edf4fb;
+  font: inherit;
+  font-weight: 900;
+  cursor: pointer;
+}
+
 .new-game-button:disabled {
   cursor: wait;
   opacity: 0.72;
