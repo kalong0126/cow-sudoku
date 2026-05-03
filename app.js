@@ -681,7 +681,7 @@ const CowSudokuCore = (() => {
 
   function difficultyFromBreakthroughs(count) {
     if (count <= 1) {
-      return "困难";
+      return "难";
     }
     if (count === 2) {
       return "中等";
@@ -1129,13 +1129,15 @@ if (typeof window !== "undefined") {
 
   window.addEventListener("DOMContentLoaded", () => {
     const board = document.querySelector("#board");
-    const newGameButton = document.querySelector("#newGameButton");
-    const difficultySelect = document.querySelector("#difficultySelect");
-    const sizeBadge = document.querySelector("#sizeBadge");
+    const musicButton = document.querySelector("#musicButton");
     const difficultyBadge = document.querySelector("#difficultyBadge");
     const livesDisplay = document.querySelector("#livesDisplay");
     const remainingCount = document.querySelector("#remainingCount");
-    const message = document.querySelector("#message");
+    const victoryModal = document.querySelector("#victoryModal");
+    const victoryCloseButton = document.querySelector("#victoryCloseButton");
+    const failureModal = document.querySelector("#failureModal");
+    const failureContinueButton = document.querySelector("#failureContinueButton");
+    const failureDismissButton = document.querySelector("#failureDismissButton");
 
     const state = {
       puzzle: null,
@@ -1148,15 +1150,311 @@ if (typeof window !== "undefined") {
       pointer: null,
     };
 
+    const audio = {
+      context: null,
+    };
+
+    const music = {
+      master: null,
+      timer: 0,
+      step: 0,
+      enabled: localStorage.getItem("cowSudokuMusic") === "on",
+      tempo: 320,
+      pattern: [
+        { note: 659.25, harmony: 392, bass: 261.63, accent: true },
+        { note: 783.99, harmony: 493.88 },
+        { note: 880, harmony: 523.25 },
+        { note: 783.99, harmony: 493.88, sparkle: 1174.66 },
+        { note: 659.25, harmony: 392, bass: 329.63 },
+        { note: 587.33, harmony: 392 },
+        { note: 523.25, harmony: 329.63 },
+        { note: 587.33, harmony: 392, sparkle: 1046.5 },
+        { note: 659.25, harmony: 392, bass: 349.23, accent: true },
+        { note: 698.46, harmony: 440 },
+        { note: 783.99, harmony: 493.88 },
+        { note: 1046.5, harmony: 523.25, sparkle: 1318.51 },
+        { note: 880, harmony: 523.25, bass: 392 },
+        { note: 783.99, harmony: 493.88 },
+        { note: 659.25, harmony: 392 },
+        { note: 523.25, harmony: 329.63, sparkle: 1046.5 },
+      ],
+    };
+
+    const sound = {
+      master: null,
+      enabled: true,
+      lastDragAt: 0,
+      dragInterval: 70,
+    };
+
+    function syncMusicButton() {
+      musicButton.textContent = music.enabled ? "音乐：开" : "音乐：关";
+      musicButton.setAttribute("aria-pressed", String(music.enabled));
+    }
+
+    function ensureAudioContext() {
+      if (audio.context) {
+        return audio.context;
+      }
+
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContext) {
+        return null;
+      }
+
+      audio.context = new AudioContext();
+      music.context = audio.context;
+      music.master = audio.context.createGain();
+      music.master.gain.value = 0;
+      music.master.connect(audio.context.destination);
+      sound.master = audio.context.createGain();
+      sound.master.gain.value = sound.enabled ? 0.72 : 0;
+      sound.master.connect(audio.context.destination);
+      return audio.context;
+    }
+
+    function ensureMusicContext() {
+      return ensureAudioContext();
+    }
+
+    function playTone(
+      frequency,
+      time,
+      duration,
+      type,
+      volume,
+      destination = music.master,
+      endFrequency = frequency
+    ) {
+      const oscillator = music.context.createOscillator();
+      const gain = music.context.createGain();
+
+      oscillator.type = type;
+      oscillator.frequency.setValueAtTime(frequency, time);
+      if (endFrequency !== frequency) {
+        oscillator.frequency.exponentialRampToValueAtTime(endFrequency, time + duration);
+      }
+      gain.gain.setValueAtTime(0, time);
+      gain.gain.linearRampToValueAtTime(volume, time + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, time + duration);
+
+      oscillator.connect(gain);
+      gain.connect(destination);
+      oscillator.start(time);
+      oscillator.stop(time + duration + 0.04);
+    }
+
+    function playSound(name) {
+      if (!sound.enabled || !music.context || !sound.master || music.context.state === "suspended") {
+        return;
+      }
+
+      const time = music.context.currentTime + 0.01;
+      if (name === "cross") {
+        playTone(784, time, 0.08, "triangle", 0.12, sound.master, 880);
+        return;
+      }
+      if (name === "erase") {
+        playTone(660, time, 0.07, "triangle", 0.1, sound.master, 520);
+        return;
+      }
+      if (name === "dragCross") {
+        playTone(720, time, 0.045, "sine", 0.055, sound.master, 850);
+        return;
+      }
+      if (name === "dragErase") {
+        playTone(560, time, 0.045, "sine", 0.05, sound.master, 460);
+        return;
+      }
+      if (name === "newGame") {
+        playTone(523.25, time, 0.09, "triangle", 0.08, sound.master, 659.25);
+        playTone(783.99, time + 0.08, 0.12, "triangle", 0.1, sound.master, 987.77);
+        return;
+      }
+      if (name === "correct") {
+        playTone(659.25, time, 0.08, "triangle", 0.09, sound.master, 880);
+        playTone(880, time + 0.055, 0.12, "sine", 0.11, sound.master, 1174.66);
+        playTone(1318.51, time + 0.13, 0.16, "triangle", 0.08, sound.master);
+        return;
+      }
+      if (name === "wrong") {
+        playTone(185, time, 0.12, "sawtooth", 0.08, sound.master, 123.47);
+        playTone(155.56, time + 0.105, 0.16, "square", 0.055, sound.master, 103.83);
+        return;
+      }
+      if (name === "win") {
+        [523.25, 659.25, 783.99, 1046.5, 1318.51].forEach((note, index) => {
+          playTone(note, time + index * 0.07, 0.2, "triangle", 0.12, sound.master);
+        });
+        [1567.98, 1975.53, 2349.32].forEach((note, index) => {
+          playTone(note, time + 0.14 + index * 0.055, 0.11, "sine", 0.07, sound.master, note * 1.2);
+        });
+        [392, 523.25, 659.25].forEach((note, index) => {
+          playTone(note, time + 0.28 + index * 0.045, 0.24, "square", 0.045, sound.master);
+        });
+        return;
+      }
+      if (name === "lose") {
+        [392, 329.63, 261.63].forEach((note, index) => {
+          playTone(note, time + index * 0.09, 0.16, "sine", 0.075, sound.master);
+        });
+      }
+    }
+
+    function playDragSound(mode) {
+      const now = Date.now();
+      if (now - sound.lastDragAt < sound.dragInterval) {
+        return;
+      }
+
+      sound.lastDragAt = now;
+      playSound(mode === "cross" ? "dragCross" : "dragErase");
+    }
+
+    function showVictoryModal() {
+      victoryModal.hidden = false;
+      window.requestAnimationFrame(() => {
+        victoryModal.classList.add("is-visible");
+        victoryCloseButton.focus({ preventScroll: true });
+      });
+    }
+
+    function hideVictoryModal() {
+      victoryModal.classList.remove("is-visible");
+      window.setTimeout(() => {
+        if (!victoryModal.classList.contains("is-visible")) {
+          victoryModal.hidden = true;
+        }
+      }, 190);
+    }
+
+    function showFailureModal() {
+      failureModal.hidden = false;
+      window.requestAnimationFrame(() => {
+        failureModal.classList.add("is-visible");
+        failureContinueButton.focus({ preventScroll: true });
+      });
+    }
+
+    function hideFailureModal() {
+      failureModal.classList.remove("is-visible");
+      window.setTimeout(() => {
+        if (!failureModal.classList.contains("is-visible")) {
+          failureModal.hidden = true;
+        }
+      }, 190);
+    }
+
+    function playMusicStep() {
+      if (!music.context || !music.master) {
+        return;
+      }
+
+      const time = music.context.currentTime + 0.02;
+      const phrase = music.pattern[music.step % music.pattern.length];
+      playTone(
+        phrase.note,
+        time,
+        phrase.accent ? 0.26 : 0.22,
+        "sine",
+        phrase.accent ? 0.088 : 0.064
+      );
+
+      if (phrase.harmony) {
+        playTone(phrase.harmony, time + 0.015, 0.28, "triangle", 0.032);
+      }
+
+      if (phrase.bass) {
+        playTone(phrase.bass, time, 0.54, "sine", 0.038);
+      }
+
+      if (phrase.sparkle) {
+        playTone(phrase.sparkle, time + 0.12, 0.16, "triangle", 0.034);
+      }
+
+      music.step += 1;
+    }
+
+    async function startMusic() {
+      const context = ensureMusicContext();
+      if (!context) {
+        music.enabled = false;
+        syncMusicButton();
+        return;
+      }
+
+      if (context.state === "suspended") {
+        await context.resume();
+      }
+
+      music.master.gain.setTargetAtTime(0.36, context.currentTime, 0.08);
+      if (!music.timer) {
+        playMusicStep();
+        music.timer = window.setInterval(playMusicStep, music.tempo);
+      }
+    }
+
+    function stopMusic() {
+      if (music.timer) {
+        window.clearInterval(music.timer);
+        music.timer = 0;
+      }
+
+      if (music.context && music.master) {
+        music.master.gain.setTargetAtTime(0, music.context.currentTime, 0.08);
+      }
+    }
+
+    async function setMusicEnabled(enabled) {
+      music.enabled = enabled;
+      localStorage.setItem("cowSudokuMusic", enabled ? "on" : "off");
+      syncMusicButton();
+
+      if (enabled) {
+        try {
+          await startMusic();
+        } catch {
+          music.enabled = false;
+          localStorage.setItem("cowSudokuMusic", "off");
+          syncMusicButton();
+        }
+      } else {
+        stopMusic();
+      }
+    }
+
+    async function setSoundEnabled(enabled) {
+      sound.enabled = enabled;
+
+      if (!enabled) {
+        if (music.context && sound.master) {
+          sound.master.gain.setTargetAtTime(0, music.context.currentTime, 0.04);
+        }
+        return;
+      }
+
+      const context = ensureAudioContext();
+      if (!context) {
+        sound.enabled = false;
+        return;
+      }
+
+      try {
+        if (context.state === "suspended") {
+          await context.resume();
+        }
+        sound.master.gain.setTargetAtTime(0.72, context.currentTime, 0.04);
+      } catch {
+        sound.enabled = false;
+      }
+    }
+
     function startGame() {
-      setLoading(true);
+      hideVictoryModal();
+      hideFailureModal();
       window.setTimeout(() => {
         try {
-          state.puzzle = CowSudokuCore.generatePuzzle(
-            null,
-            Math.random,
-            difficultySelect.value
-          );
+          state.puzzle = CowSudokuCore.generatePuzzle(null, Math.random, "random");
           state.cells = Array.from({ length: state.puzzle.n }, () =>
             Array(state.puzzle.n).fill("empty")
           );
@@ -1168,18 +1466,12 @@ if (typeof window !== "undefined") {
           clearTimeout(state.tapTimer);
 
           renderBoard();
-          syncHud("单击标叉，双击确认小牛，拖动可连续标叉或取消叉。");
+          syncHud();
+          playSound("newGame");
         } catch (error) {
-          syncHud(error.message || "题目生成失败，请再试一次。", "error");
-        } finally {
-          setLoading(false);
+          syncHud();
         }
       }, 20);
-    }
-
-    function setLoading(isLoading) {
-      newGameButton.disabled = isLoading;
-      newGameButton.textContent = isLoading ? "生成中" : "新局";
     }
 
     function renderBoard() {
@@ -1204,16 +1496,10 @@ if (typeof window !== "undefined") {
       }
     }
 
-    function syncHud(text, tone = "") {
-      sizeBadge.textContent = state.puzzle ? `${state.puzzle.n} x ${state.puzzle.n}` : "- x -";
-      difficultyBadge.textContent = state.puzzle
-        ? `${state.puzzle.difficulty} · ${state.puzzle.initialBreakthroughs} 个突破口 · ${state.puzzle.multiSourcePlacements} 个联动`
-        : "生成中";
+    function syncHud() {
+      difficultyBadge.textContent = state.puzzle ? state.puzzle.difficulty : "生成中";
       remainingCount.textContent = state.puzzle ? String(state.puzzle.n - state.found) : "0";
       livesDisplay.textContent = "❤ ".repeat(state.lives).trim() || "无";
-      message.textContent = text;
-      message.classList.toggle("is-error", tone === "error");
-      message.classList.toggle("is-success", tone === "success");
       board.classList.toggle("is-locked", state.status !== "active");
     }
 
@@ -1246,18 +1532,33 @@ if (typeof window !== "undefined") {
     }
 
     function setCellState(row, col, nextState) {
-      if (state.status !== "active" || state.cells[row][col] === "cow") {
-        return;
+      if (
+        state.status !== "active" ||
+        state.cells[row][col] === "cow" ||
+        state.cells[row][col] === "wrong"
+      ) {
+        return false;
+      }
+      if (state.cells[row][col] === nextState) {
+        return false;
       }
       state.cells[row][col] = nextState;
       paintCell(row, col);
+      return true;
     }
 
     function toggleCross(row, col) {
-      if (state.status !== "active" || state.cells[row][col] === "cow") {
+      if (
+        state.status !== "active" ||
+        state.cells[row][col] === "cow" ||
+        state.cells[row][col] === "wrong"
+      ) {
         return;
       }
-      setCellState(row, col, state.cells[row][col] === "cross" ? "empty" : "cross");
+      const nextState = state.cells[row][col] === "cross" ? "empty" : "cross";
+      if (setCellState(row, col, nextState)) {
+        playSound(nextState === "cross" ? "cross" : "erase");
+      }
     }
 
     function paintCell(row, col) {
@@ -1268,6 +1569,7 @@ if (typeof window !== "undefined") {
 
       cell.innerHTML = "";
       cell.classList.toggle("is-found", state.cells[row][col] === "cow");
+      cell.classList.toggle("is-wrong", state.cells[row][col] === "wrong");
 
       if (state.cells[row][col] === "cross") {
         const cross = document.createElement("span");
@@ -1278,12 +1580,43 @@ if (typeof window !== "undefined") {
       if (state.cells[row][col] === "cow") {
         const cow = document.createElement("span");
         cow.className = "cow-mark";
+        [
+          "cow-ear cow-ear-left",
+          "cow-ear cow-ear-right",
+          "cow-horn cow-horn-left",
+          "cow-horn cow-horn-right",
+          "cow-face-spot cow-face-spot-left",
+          "cow-face-spot cow-face-spot-right",
+          "cow-hair",
+          "cow-eye cow-eye-left",
+          "cow-eye cow-eye-right",
+          "cow-cheek cow-cheek-left",
+          "cow-cheek cow-cheek-right",
+          "cow-muzzle",
+          "cow-mouth",
+        ].forEach((className) => {
+          const part = document.createElement("span");
+          part.className = className;
+          part.setAttribute("aria-hidden", "true");
+          cow.append(part);
+        });
         cell.append(cow);
+      }
+
+      if (state.cells[row][col] === "wrong") {
+        const wrongMark = document.createElement("span");
+        wrongMark.className = "wrong-mark";
+        wrongMark.setAttribute("aria-hidden", "true");
+        cell.append(wrongMark);
       }
     }
 
     function confirmCow(row, col) {
-      if (state.status !== "active" || state.cells[row][col] === "cow") {
+      if (
+        state.status !== "active" ||
+        state.cells[row][col] === "cow" ||
+        state.cells[row][col] === "wrong"
+      ) {
         return;
       }
 
@@ -1294,9 +1627,12 @@ if (typeof window !== "undefined") {
 
         if (state.found === state.puzzle.n) {
           state.status = "won";
-          syncHud("成功！全部小牛都找出来了。", "success");
+          syncHud();
+          playSound("win");
+          showVictoryModal();
         } else {
-          syncHud("找到一只小牛。继续！");
+          syncHud();
+          playSound("correct");
         }
         return;
       }
@@ -1306,9 +1642,12 @@ if (typeof window !== "undefined") {
 
       if (state.lives <= 0) {
         state.status = "lost";
-        syncHud("失败了。点击新局再试一次。", "error");
+        syncHud();
+        playSound("lose");
+        showFailureModal();
       } else {
-        syncHud("这里没有小牛，扣 1 颗心。", "error");
+        syncHud();
+        playSound("wrong");
       }
     }
 
@@ -1317,10 +1656,11 @@ if (typeof window !== "undefined") {
       if (!cell) {
         return;
       }
+      state.cells[row][col] = "wrong";
+      paintCell(row, col);
       cell.classList.remove("is-wrong");
       void cell.offsetWidth;
       cell.classList.add("is-wrong");
-      window.setTimeout(() => cell.classList.remove("is-wrong"), 420);
     }
 
     function finishTap(position) {
@@ -1354,12 +1694,16 @@ if (typeof window !== "undefined") {
       }
 
       const position = readCell(cell);
+      if (state.cells[position.row][position.col] === "wrong") {
+        return;
+      }
       clearTimeout(state.tapTimer);
       state.pointer = {
         id: event.pointerId,
         start: position,
         last: position,
         moved: false,
+        startPainted: false,
         dragMode: state.cells[position.row][position.col] === "cross" ? "empty" : "cross",
       };
       board.setPointerCapture(event.pointerId);
@@ -1380,8 +1724,21 @@ if (typeof window !== "undefined") {
         state.pointer.moved = true;
       }
 
+      if (state.pointer.moved && !state.pointer.startPainted) {
+        if (setCellState(
+          state.pointer.start.row,
+          state.pointer.start.col,
+          state.pointer.dragMode
+        )) {
+          playDragSound(state.pointer.dragMode);
+        }
+        state.pointer.startPainted = true;
+      }
+
       if (state.pointer.moved && !sameCell(position, state.pointer.last)) {
-        setCellState(position.row, position.col, state.pointer.dragMode);
+        if (setCellState(position.row, position.col, state.pointer.dragMode)) {
+          playDragSound(state.pointer.dragMode);
+        }
         state.pointer.last = position;
       }
     });
@@ -1396,8 +1753,12 @@ if (typeof window !== "undefined") {
       const position = cell ? readCell(cell) : pointer.start;
 
       if (pointer.moved) {
-        setCellState(pointer.start.row, pointer.start.col, pointer.dragMode);
-        setCellState(position.row, position.col, pointer.dragMode);
+        if (setCellState(pointer.start.row, pointer.start.col, pointer.dragMode)) {
+          playDragSound(pointer.dragMode);
+        }
+        if (setCellState(position.row, position.col, pointer.dragMode)) {
+          playDragSound(pointer.dragMode);
+        }
         state.lastTap = null;
         clearTimeout(state.tapTimer);
       } else {
@@ -1424,8 +1785,42 @@ if (typeof window !== "undefined") {
       event.preventDefault();
     });
 
-    newGameButton.addEventListener("click", startGame);
-    difficultySelect.addEventListener("change", startGame);
+    musicButton.addEventListener("click", () => {
+      setMusicEnabled(!music.enabled);
+    });
+    victoryCloseButton.addEventListener("click", startGame);
+    failureContinueButton.addEventListener("click", startGame);
+    failureDismissButton.addEventListener("click", hideFailureModal);
+    victoryModal.addEventListener("click", (event) => {
+      if (event.target === victoryModal) {
+        hideVictoryModal();
+      }
+    });
+    failureModal.addEventListener("click", (event) => {
+      if (event.target === failureModal) {
+        hideFailureModal();
+      }
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !victoryModal.hidden) {
+        hideVictoryModal();
+      }
+      if (event.key === "Escape" && !failureModal.hidden) {
+        hideFailureModal();
+      }
+    });
+    document.addEventListener(
+      "pointerdown",
+      () => {
+        if (music.enabled && !music.timer) {
+          startMusic().catch(() => setMusicEnabled(false));
+        }
+        if (sound.enabled && !music.context) {
+          setSoundEnabled(true).catch(() => setSoundEnabled(false));
+        }
+      },
+      { once: true }
+    );
 
     window.CowSudokuGame = {
       newGame: startGame,
@@ -1438,6 +1833,7 @@ if (typeof window !== "undefined") {
       }),
     };
 
+    syncMusicButton();
     startGame();
   });
 }

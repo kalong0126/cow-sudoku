@@ -1,11 +1,11 @@
 "use strict";
 
-const CACHE_NAME = "cow-sudoku-v2";
+const CACHE_NAME = "cow-sudoku-v17";
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css",
-  "./app.js",
+  "./styles.css?v=6",
+  "./app.js?v=12",
   "./manifest.webmanifest",
   "./icon.svg",
 ];

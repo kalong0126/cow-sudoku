@@ -11,31 +11,18 @@
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="icon.svg">
-    <link rel="stylesheet" href="styles.css">
-    <script defer src="app.js"></script>
+    <link rel="stylesheet" href="styles.css?v=6">
+    <script defer src="app.js?v=12"></script>
   </head>
   <body>
     <main class="app-shell">
       <section class="top-panel" aria-label="游戏信息">
         <div class="level-row">
           <span class="level-title">小牛数独</span>
-          <label class="difficulty-control">
-            <span>难度</span>
-            <select id="difficultySelect" aria-label="选择难度">
-              <option value="random">随机</option>
-              <option value="easy">简单</option>
-              <option value="medium">中等</option>
-              <option value="hard">困难</option>
-            </select>
-          </label>
-          <button class="new-game-button" id="newGameButton" type="button">新局</button>
+          <button class="music-button" id="musicButton" type="button" aria-pressed="false">音乐：关</button>
         </div>
 
         <div class="status-row">
-          <div class="pill">
-            <span class="pill-label">棋盘</span>
-            <strong id="sizeBadge">- x -</strong>
-          </div>
           <div class="pill">
             <span class="pill-label">难度</span>
             <strong id="difficultyBadge">生成中</strong>
@@ -55,9 +42,27 @@
       </section>
 
       <section class="board-wrap" aria-label="游戏棋盘">
-        <div class="message" id="message" role="status">单击标叉，双击确认小牛，拖动连续标叉。</div>
         <div class="board" id="board" role="grid" aria-label="小牛数独棋盘"></div>
       </section>
+
+      <div class="victory-modal" id="victoryModal" role="dialog" aria-modal="true" aria-labelledby="victoryTitle" hidden>
+        <div class="victory-card">
+          <div class="victory-kicker">全部找到了</div>
+          <h2 id="victoryTitle">Excellent</h2>
+          <button class="victory-close-button" id="victoryCloseButton" type="button">继续</button>
+        </div>
+      </div>
+
+      <div class="victory-modal failure-modal" id="failureModal" role="dialog" aria-modal="true" aria-labelledby="failureTitle" hidden>
+        <div class="victory-card failure-card">
+          <div class="victory-kicker">三颗心用完了</div>
+          <h2 id="failureTitle">再试一次？</h2>
+          <div class="failure-actions">
+            <button class="victory-close-button" id="failureContinueButton" type="button">继续</button>
+            <button class="failure-dismiss-button" id="failureDismissButton" type="button">关闭</button>
+          </div>
+        </div>
+      </div>
     </main>
   </body>
 </html>
