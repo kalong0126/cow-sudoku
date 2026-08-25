@@ -1130,14 +1130,32 @@ if (typeof window !== "undefined") {
   window.addEventListener("DOMContentLoaded", () => {
     const board = document.querySelector("#board");
     const musicButton = document.querySelector("#musicButton");
+    const streakButton = document.querySelector("#streakButton");
+    const statsButton = document.querySelector("#statsButton");
+    const streakExitButton = document.querySelector("#streakExitButton");
+    const streakProgress = document.querySelector("#streakProgress");
     const difficultyBadge = document.querySelector("#difficultyBadge");
     const livesDisplay = document.querySelector("#livesDisplay");
     const remainingCount = document.querySelector("#remainingCount");
+    const statsModal = document.querySelector("#statsModal");
+    const statsCloseButton = document.querySelector("#statsCloseButton");
+    const historySelect = document.querySelector("#historySelect");
+    const playerIp = document.querySelector("#playerIp");
+    const statsTitle = document.querySelector("#statsTitle");
+    const statsBody = document.querySelector("#statsBody");
+    const statsTotal = document.querySelector("#statsTotal");
     const victoryModal = document.querySelector("#victoryModal");
+    const victoryKicker = document.querySelector("#victoryKicker");
+    const victoryTitle = document.querySelector("#victoryTitle");
     const victoryCloseButton = document.querySelector("#victoryCloseButton");
     const failureModal = document.querySelector("#failureModal");
+    const failureKicker = document.querySelector("#failureKicker");
+    const failureTitle = document.querySelector("#failureTitle");
     const failureContinueButton = document.querySelector("#failureContinueButton");
     const failureDismissButton = document.querySelector("#failureDismissButton");
+
+    const STREAK_STORAGE_KEY = "cowSudokuTenGameStreakV1";
+    const LAST_IP_STORAGE_KEY = "cowSudokuLastPlayerIp";
 
     const state = {
       puzzle: null,
@@ -1148,6 +1166,20 @@ if (typeof window !== "undefined") {
       tapTimer: 0,
       lastTap: null,
       pointer: null,
+      justFinishedStreak: false,
+      selectedReportId: null,
+      streak: {
+        active: false,
+        playerIp: localStorage.getItem(LAST_IP_STORAGE_KEY) || "获取中…",
+        runStartedAt: null,
+        roundStartedAt: null,
+        roundNumber: 0,
+        completed: [],
+        awaitingAdvance: false,
+        currentGame: null,
+        lastReport: null,
+        history: [],
+      },
     };
 
     const audio = {
@@ -1311,7 +1343,416 @@ if (typeof window !== "undefined") {
       playSound(mode === "cross" ? "dragCross" : "dragErase");
     }
 
+    function formatDuration(durationMs) {
+      const totalSeconds = Math.max(0, Math.floor((durationMs || 0) / 1000));
+      const hours = Math.floor(totalSeconds / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const seconds = totalSeconds % 60;
+      const base = `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+      return hours > 0 ? `${String(hours).padStart(2, "0")}:${base}` : base;
+    }
+
+    function formatReportDate(timestamp) {
+      const date = new Date(Number(timestamp));
+      if (Number.isNaN(date.getTime())) {
+        return "时间未知";
+      }
+      return date.toLocaleString("zh-CN", {
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
+    }
+
+    function normalizeReport(report) {
+      if (!report || !Array.isArray(report.rounds)) {
+        return null;
+      }
+      const startedAt = Number(report.startedAt) || Number(report.completedAt) || Date.now();
+      return {
+        ...report,
+        id: report.id || `challenge-${startedAt}`,
+        startedAt,
+        completedAt: Number(report.completedAt) || startedAt,
+        totalDurationMs: Math.max(0, Number(report.totalDurationMs) || 0),
+        rounds: report.rounds.slice(0, 10),
+        aborted: Boolean(report.aborted),
+      };
+    }
+
+    function addReportToHistory(report) {
+      const normalized = normalizeReport(report);
+      if (!normalized) {
+        return;
+      }
+      state.streak.history = [
+        normalized,
+        ...state.streak.history.filter((item) => item.id !== normalized.id),
+      ].slice(0, 50);
+      state.streak.lastReport = normalized;
+      state.selectedReportId = normalized.id;
+    }
+
+    function snapshotCurrentGame() {
+      if (!state.puzzle) {
+        return null;
+      }
+      return {
+        puzzle: state.puzzle,
+        cells: state.cells.map((row) => row.slice()),
+        lives: state.lives,
+        found: state.found,
+        status: state.status,
+      };
+    }
+
+    function persistStreak() {
+      try {
+        localStorage.setItem(
+          STREAK_STORAGE_KEY,
+          JSON.stringify({
+            version: 1,
+            active: state.streak.active,
+            playerIp: state.streak.playerIp,
+            runStartedAt: state.streak.runStartedAt,
+            roundStartedAt: state.streak.roundStartedAt,
+            roundNumber: state.streak.roundNumber,
+            completed: state.streak.completed,
+            awaitingAdvance: state.streak.awaitingAdvance,
+            currentGame: state.streak.currentGame,
+            lastReport: state.streak.lastReport,
+            history: state.streak.history,
+          })
+        );
+      } catch {
+        // 存储空间不可用时游戏仍可继续，只是不具备刷新恢复能力。
+      }
+    }
+
+    function persistCurrentGame() {
+      if (!state.streak.active) {
+        return;
+      }
+      state.streak.currentGame = snapshotCurrentGame();
+      persistStreak();
+    }
+
+    function isValidGameSnapshot(snapshot) {
+      if (!snapshot || !snapshot.puzzle || !Array.isArray(snapshot.cells)) {
+        return false;
+      }
+      const validation = CowSudokuCore.validatePuzzle(snapshot.puzzle);
+      if (!validation.ok || snapshot.cells.length !== snapshot.puzzle.n) {
+        return false;
+      }
+      return snapshot.cells.every(
+        (row) => Array.isArray(row) && row.length === snapshot.puzzle.n
+      );
+    }
+
+    function loadStreak() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(STREAK_STORAGE_KEY) || "null");
+        if (!saved || saved.version !== 1) {
+          return false;
+        }
+
+        state.streak.playerIp = saved.playerIp || state.streak.playerIp;
+        const savedHistory = Array.isArray(saved.history)
+          ? saved.history
+          : saved.lastReport
+            ? [saved.lastReport]
+            : [];
+        state.streak.history = savedHistory.map(normalizeReport).filter(Boolean).slice(0, 50);
+        state.streak.lastReport =
+          normalizeReport(saved.lastReport) || state.streak.history[0] || null;
+        if (!saved.active || !isValidGameSnapshot(saved.currentGame)) {
+          state.streak.active = false;
+          state.streak.currentGame = null;
+          persistStreak();
+          return false;
+        }
+
+        state.streak.active = true;
+        state.streak.runStartedAt = Number(saved.runStartedAt) || Date.now();
+        state.streak.roundStartedAt = Number(saved.roundStartedAt) || Date.now();
+        state.streak.roundNumber = Math.min(10, Math.max(1, Number(saved.roundNumber) || 1));
+        state.streak.completed = Array.isArray(saved.completed) ? saved.completed.slice(0, 10) : [];
+        state.streak.awaitingAdvance = Boolean(saved.awaitingAdvance);
+        state.streak.currentGame = saved.currentGame;
+
+        state.puzzle = saved.currentGame.puzzle;
+        state.cells = saved.currentGame.cells.map((row) => row.slice());
+        state.lives = Math.min(3, Math.max(0, Number(saved.currentGame.lives) || 0));
+        state.found = Math.min(
+          state.puzzle.n,
+          Math.max(0, Number(saved.currentGame.found) || 0)
+        );
+        state.status = ["active", "won", "lost"].includes(saved.currentGame.status)
+          ? saved.currentGame.status
+          : "active";
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    function addStatsCell(row, text, className = "") {
+      const cell = document.createElement("td");
+      cell.textContent = text;
+      if (className) {
+        cell.className = className;
+      }
+      row.append(cell);
+    }
+
+    function renderStats() {
+      const matchingHistory = state.streak.history
+        .filter((report) => report.playerIp === state.streak.playerIp)
+        .sort((a, b) => b.completedAt - a.completedAt);
+      let selectedReport = matchingHistory.find(
+        (report) => report.id === state.selectedReportId
+      );
+
+      if (!state.streak.active && !selectedReport) {
+        selectedReport = matchingHistory[0] || null;
+        state.selectedReportId = selectedReport ? selectedReport.id : null;
+      }
+      if (state.selectedReportId && !selectedReport) {
+        state.selectedReportId = null;
+      }
+
+      const showingActive = state.streak.active && !selectedReport;
+      const rows = showingActive
+        ? state.streak.completed
+        : selectedReport
+          ? selectedReport.rounds
+          : [];
+
+      historySelect.innerHTML = "";
+      if (state.streak.active) {
+        const currentOption = document.createElement("option");
+        currentOption.value = "";
+        currentOption.textContent = `当前挑战 · 已完成 ${state.streak.completed.length} / 10`;
+        historySelect.append(currentOption);
+      }
+      matchingHistory.forEach((report) => {
+        const option = document.createElement("option");
+        option.value = report.id;
+        option.textContent = `${formatReportDate(report.startedAt)} · ${
+          report.aborted ? "已退出" : "已完成"
+        } · ${report.rounds.length} 局`;
+        historySelect.append(option);
+      });
+      if (!state.streak.active && matchingHistory.length === 0) {
+        const emptyOption = document.createElement("option");
+        emptyOption.value = "";
+        emptyOption.textContent = "当前 IP 暂无历史记录";
+        historySelect.append(emptyOption);
+      }
+      historySelect.value = selectedReport ? selectedReport.id : "";
+
+      playerIp.textContent = selectedReport
+        ? selectedReport.playerIp
+        : state.streak.playerIp || "无法获取";
+      statsBody.innerHTML = "";
+
+      if (rows.length === 0 && !showingActive) {
+        const emptyRow = document.createElement("tr");
+        emptyRow.className = "stats-empty-row";
+        const emptyCell = document.createElement("td");
+        emptyCell.colSpan = 5;
+        emptyCell.textContent = selectedReport
+          ? "本次挑战在完成第一局前退出"
+          : "当前 IP 暂无挑战记录";
+        emptyRow.append(emptyCell);
+        statsBody.append(emptyRow);
+      } else {
+        rows.forEach((item) => {
+          const row = document.createElement("tr");
+          addStatsCell(row, `第 ${item.round} 局`);
+          addStatsCell(row, item.difficulty || "--");
+          addStatsCell(
+            row,
+            item.result === "won" ? "完成" : "失败",
+            item.result === "won" ? "stats-result-win" : "stats-result-lose"
+          );
+          addStatsCell(row, `${item.lives} 颗`);
+          addStatsCell(row, formatDuration(item.durationMs));
+          statsBody.append(row);
+        });
+
+        if (
+          showingActive &&
+          !state.streak.awaitingAdvance &&
+          state.status === "active" &&
+          state.puzzle &&
+          state.streak.roundStartedAt
+        ) {
+          const activeRow = document.createElement("tr");
+          addStatsCell(activeRow, `第 ${state.streak.roundNumber} 局`);
+          addStatsCell(activeRow, state.puzzle.difficulty || "生成中");
+          addStatsCell(activeRow, "进行中", "stats-result-active");
+          addStatsCell(activeRow, `${state.lives} 颗`);
+          addStatsCell(activeRow, formatDuration(Date.now() - state.streak.roundStartedAt));
+          statsBody.append(activeRow);
+        }
+      }
+
+      if (showingActive) {
+        statsTitle.textContent = `十局挑战 · 已完成 ${state.streak.completed.length} / 10`;
+        statsTotal.textContent = `当前总耗时：${formatDuration(Date.now() - state.streak.runStartedAt)}`;
+      } else if (selectedReport) {
+        statsTitle.textContent = selectedReport.aborted
+          ? "历史挑战 · 已退出"
+          : "历史挑战 · 已完成";
+        statsTotal.textContent = `总耗时：${formatDuration(selectedReport.totalDurationMs)}`;
+      } else {
+        statsTitle.textContent = "挑战记录";
+        statsTotal.textContent = "总耗时：--:--";
+      }
+
+      if (state.streak.active) {
+        streakProgress.hidden = false;
+        streakProgress.textContent = `第 ${state.streak.roundNumber} / 10 局`;
+      } else {
+        streakProgress.hidden = true;
+      }
+      streakButton.disabled = state.streak.active;
+      streakButton.textContent = state.streak.active ? "十局挑战进行中" : "连开十局";
+      streakExitButton.hidden = !state.streak.active;
+    }
+
+    async function resolvePlayerIp() {
+      if (["localhost", "127.0.0.1", "::1"].includes(window.location.hostname)) {
+        state.streak.playerIp = "127.0.0.1";
+        renderStats();
+        return;
+      }
+
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 5000);
+      try {
+        const response = await fetch("https://api64.ipify.org?format=json", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          throw new Error("IP 服务不可用");
+        }
+        const data = await response.json();
+        const value = typeof data.ip === "string" ? data.ip.trim() : "";
+        if (!value || !/^[0-9a-f:.]+$/i.test(value)) {
+          throw new Error("IP 格式不正确");
+        }
+        state.streak.playerIp = value;
+        localStorage.setItem(LAST_IP_STORAGE_KEY, value);
+        if (state.streak.lastReport && state.streak.lastReport.playerIp === "获取中…") {
+          state.streak.lastReport.playerIp = value;
+        }
+        state.streak.history.forEach((report) => {
+          if (report.playerIp === "获取中…") {
+            report.playerIp = value;
+          }
+        });
+        persistStreak();
+      } catch {
+        if (!state.streak.playerIp || state.streak.playerIp === "获取中…") {
+          state.streak.playerIp = "无法获取";
+        }
+      } finally {
+        window.clearTimeout(timeout);
+        renderStats();
+      }
+    }
+
+    function finishStreakRound(result) {
+      if (!state.streak.active || state.streak.awaitingAdvance) {
+        return;
+      }
+
+      const finishedAt = Date.now();
+      state.streak.completed.push({
+        round: state.streak.roundNumber,
+        difficulty: state.puzzle.difficulty,
+        size: state.puzzle.n,
+        result,
+        lives: state.lives,
+        durationMs: Math.max(0, finishedAt - state.streak.roundStartedAt),
+      });
+      state.streak.awaitingAdvance = true;
+      state.streak.currentGame = snapshotCurrentGame();
+
+      if (state.streak.completed.length >= 10) {
+        addReportToHistory({
+          id: `challenge-${state.streak.runStartedAt}`,
+          playerIp: state.streak.playerIp,
+          startedAt: state.streak.runStartedAt,
+          completedAt: finishedAt,
+          totalDurationMs: Math.max(0, finishedAt - state.streak.runStartedAt),
+          rounds: state.streak.completed.map((item) => ({ ...item })),
+          aborted: false,
+        });
+        state.streak.active = false;
+        state.streak.awaitingAdvance = false;
+        state.streak.currentGame = null;
+        state.justFinishedStreak = true;
+      }
+
+      persistStreak();
+      renderStats();
+    }
+
+    function configureResultModal(result) {
+      if (state.justFinishedStreak) {
+        const kicker = result === "won" ? victoryKicker : failureKicker;
+        const title = result === "won" ? victoryTitle : failureTitle;
+        const continueButton =
+          result === "won" ? victoryCloseButton : failureContinueButton;
+        kicker.textContent = "十局挑战全部结束";
+        title.textContent = "十局完成";
+        continueButton.textContent = "结束";
+        failureDismissButton.hidden = result === "lost";
+        return;
+      }
+
+      if (state.streak.active && state.streak.awaitingAdvance) {
+        const currentRound = state.streak.completed.length;
+        const kicker = result === "won" ? victoryKicker : failureKicker;
+        const title = result === "won" ? victoryTitle : failureTitle;
+        const continueButton =
+          result === "won" ? victoryCloseButton : failureContinueButton;
+        kicker.textContent = `第 ${currentRound} / 10 局${result === "won" ? "完成" : "失败"}`;
+        title.textContent = "下一局";
+        continueButton.textContent = "继续";
+        failureDismissButton.hidden = result === "lost";
+        return;
+      }
+
+      victoryKicker.textContent = "全部找到了";
+      victoryTitle.textContent = "Excellent";
+      victoryCloseButton.textContent = "继续";
+      failureKicker.textContent = "三颗心用完了";
+      failureTitle.textContent = "再试一次？";
+      failureContinueButton.textContent = "继续";
+      failureDismissButton.hidden = false;
+    }
+
+    function showStatsModal() {
+      renderStats();
+      statsModal.hidden = false;
+      statsCloseButton.focus({ preventScroll: true });
+    }
+
+    function hideStatsModal() {
+      statsModal.hidden = true;
+      statsButton.focus({ preventScroll: true });
+    }
+
     function showVictoryModal() {
+      configureResultModal("won");
       victoryModal.hidden = false;
       window.requestAnimationFrame(() => {
         victoryModal.classList.add("is-visible");
@@ -1329,6 +1770,7 @@ if (typeof window !== "undefined") {
     }
 
     function showFailureModal() {
+      configureResultModal("lost");
       failureModal.hidden = false;
       window.requestAnimationFrame(() => {
         failureModal.classList.add("is-visible");
@@ -1449,9 +1891,15 @@ if (typeof window !== "undefined") {
       }
     }
 
-    function startGame() {
+    function startGame(options = {}) {
+      if (state.streak.active && !options.force) {
+        return false;
+      }
+
       hideVictoryModal();
       hideFailureModal();
+      state.status = "generating";
+      syncHud();
       window.setTimeout(() => {
         try {
           state.puzzle = CowSudokuCore.generatePuzzle(null, Math.random, "random");
@@ -1465,13 +1913,108 @@ if (typeof window !== "undefined") {
           state.pointer = null;
           clearTimeout(state.tapTimer);
 
+          if (state.streak.active) {
+            state.streak.roundStartedAt = Date.now();
+            state.streak.awaitingAdvance = false;
+            state.streak.currentGame = snapshotCurrentGame();
+            persistStreak();
+          }
+
           renderBoard();
           syncHud();
           playSound("newGame");
         } catch (error) {
+          state.status = "error";
           syncHud();
         }
       }, 20);
+      return true;
+    }
+
+    function beginStreak() {
+      if (state.streak.active) {
+        return;
+      }
+
+      const now = Date.now();
+      state.justFinishedStreak = false;
+      state.selectedReportId = null;
+      state.streak.active = true;
+      state.streak.runStartedAt = now;
+      state.streak.roundStartedAt = null;
+      state.streak.roundNumber = 1;
+      state.streak.completed = [];
+      state.streak.awaitingAdvance = false;
+      state.streak.currentGame = null;
+      state.status = "idle";
+      persistStreak();
+      renderStats();
+      startGame({ force: true });
+    }
+
+    function exitStreak() {
+      if (!state.streak.active) {
+        return;
+      }
+
+      const exitedAt = Date.now();
+      addReportToHistory({
+        id: `challenge-${state.streak.runStartedAt}`,
+        playerIp: state.streak.playerIp,
+        startedAt: state.streak.runStartedAt,
+        completedAt: exitedAt,
+        totalDurationMs: Math.max(0, exitedAt - state.streak.runStartedAt),
+        rounds: state.streak.completed.map((item) => ({ ...item })),
+        aborted: true,
+      });
+      state.streak.active = false;
+      state.streak.awaitingAdvance = false;
+      state.streak.currentGame = null;
+      state.justFinishedStreak = false;
+      state.status = "idle";
+      hideStatsModal();
+      hideVictoryModal();
+      hideFailureModal();
+      persistStreak();
+      renderStats();
+      startGame({ force: true });
+    }
+
+    function continueAfterResult() {
+      hideVictoryModal();
+      hideFailureModal();
+
+      if (state.streak.active && state.streak.awaitingAdvance) {
+        state.streak.roundNumber += 1;
+        state.streak.roundStartedAt = null;
+        state.streak.awaitingAdvance = false;
+        state.streak.currentGame = null;
+        state.status = "idle";
+        persistStreak();
+        renderStats();
+        startGame({ force: true });
+        return;
+      }
+
+      state.justFinishedStreak = false;
+      startGame();
+    }
+
+    function restoreOrStartGame() {
+      const restored = loadStreak();
+      if (!restored) {
+        startGame();
+        renderStats();
+        return;
+      }
+
+      renderBoard();
+      syncHud();
+      if (state.status === "won") {
+        showVictoryModal();
+      } else if (state.status === "lost") {
+        showFailureModal();
+      }
     }
 
     function renderBoard() {
@@ -1492,6 +2035,7 @@ if (typeof window !== "undefined") {
           cell.setAttribute("role", "gridcell");
           cell.setAttribute("aria-label", `第 ${row + 1} 行，第 ${col + 1} 列`);
           board.append(cell);
+          paintCell(row, col);
         }
       }
     }
@@ -1501,6 +2045,7 @@ if (typeof window !== "undefined") {
       remainingCount.textContent = state.puzzle ? String(state.puzzle.n - state.found) : "0";
       livesDisplay.textContent = "❤ ".repeat(state.lives).trim() || "无";
       board.classList.toggle("is-locked", state.status !== "active");
+      renderStats();
     }
 
     function getCellFromEvent(event) {
@@ -1544,6 +2089,7 @@ if (typeof window !== "undefined") {
       }
       state.cells[row][col] = nextState;
       paintCell(row, col);
+      persistCurrentGame();
       return true;
     }
 
@@ -1629,10 +2175,12 @@ if (typeof window !== "undefined") {
           state.status = "won";
           syncHud();
           playSound("win");
+          finishStreakRound("won");
           showVictoryModal();
         } else {
           syncHud();
           playSound("correct");
+          persistCurrentGame();
         }
         return;
       }
@@ -1644,10 +2192,12 @@ if (typeof window !== "undefined") {
         state.status = "lost";
         syncHud();
         playSound("lose");
+        finishStreakRound("lost");
         showFailureModal();
       } else {
         syncHud();
         playSound("wrong");
+        persistCurrentGame();
       }
     }
 
@@ -1788,24 +2338,59 @@ if (typeof window !== "undefined") {
     musicButton.addEventListener("click", () => {
       setMusicEnabled(!music.enabled);
     });
-    victoryCloseButton.addEventListener("click", startGame);
-    failureContinueButton.addEventListener("click", startGame);
+    streakButton.addEventListener("click", beginStreak);
+    statsButton.addEventListener("click", showStatsModal);
+    streakExitButton.addEventListener("click", exitStreak);
+    statsCloseButton.addEventListener("click", hideStatsModal);
+    historySelect.addEventListener("change", () => {
+      state.selectedReportId = historySelect.value || null;
+      renderStats();
+    });
+    victoryCloseButton.addEventListener("click", continueAfterResult);
+    failureContinueButton.addEventListener("click", continueAfterResult);
     failureDismissButton.addEventListener("click", hideFailureModal);
+    statsModal.addEventListener("click", (event) => {
+      if (event.target === statsModal) {
+        hideStatsModal();
+      }
+    });
     victoryModal.addEventListener("click", (event) => {
-      if (event.target === victoryModal) {
+      if (
+        event.target === victoryModal &&
+        !state.streak.active &&
+        !state.justFinishedStreak
+      ) {
         hideVictoryModal();
       }
     });
     failureModal.addEventListener("click", (event) => {
-      if (event.target === failureModal) {
+      if (
+        event.target === failureModal &&
+        !state.streak.active &&
+        !state.justFinishedStreak
+      ) {
         hideFailureModal();
       }
     });
     document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && !victoryModal.hidden) {
+      if (event.key === "Escape" && !statsModal.hidden) {
+        hideStatsModal();
+        return;
+      }
+      if (
+        event.key === "Escape" &&
+        !victoryModal.hidden &&
+        !state.streak.active &&
+        !state.justFinishedStreak
+      ) {
         hideVictoryModal();
       }
-      if (event.key === "Escape" && !failureModal.hidden) {
+      if (
+        event.key === "Escape" &&
+        !failureModal.hidden &&
+        !state.streak.active &&
+        !state.justFinishedStreak
+      ) {
         hideFailureModal();
       }
     });
@@ -1824,16 +2409,33 @@ if (typeof window !== "undefined") {
 
     window.CowSudokuGame = {
       newGame: startGame,
+      startTenGameStreak: beginStreak,
+      exitTenGameStreak: exitStreak,
       getState: () => ({
         puzzle: state.puzzle,
         cells: state.cells.map((row) => row.slice()),
         lives: state.lives,
         found: state.found,
         status: state.status,
+        streak: {
+          active: state.streak.active,
+          playerIp: state.streak.playerIp,
+          roundNumber: state.streak.roundNumber,
+          completed: state.streak.completed.map((item) => ({ ...item })),
+          awaitingAdvance: state.streak.awaitingAdvance,
+          lastReport: state.streak.lastReport,
+          history: state.streak.history.map((report) => ({ ...report })),
+        },
       }),
     };
 
     syncMusicButton();
-    startGame();
+    restoreOrStartGame();
+    resolvePlayerIp();
+    window.setInterval(() => {
+      if (state.streak.active) {
+        renderStats();
+      }
+    }, 1000);
   });
 }

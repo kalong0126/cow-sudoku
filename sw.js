@@ -1,11 +1,11 @@
 "use strict";
 
-const CACHE_NAME = "cow-sudoku-v17";
+const CACHE_NAME = "cow-sudoku-v21";
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=6",
-  "./app.js?v=12",
+  "./styles.css?v=9",
+  "./app.js?v=16",
   "./manifest.webmanifest",
   "./icon.svg",
 ];
@@ -33,7 +33,8 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
-  if (event.request.method !== "GET") {
+  const requestUrl = new URL(event.request.url);
+  if (event.request.method !== "GET" || requestUrl.origin !== self.location.origin) {
     return;
   }
 

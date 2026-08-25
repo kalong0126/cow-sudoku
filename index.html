@@ -11,8 +11,8 @@
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="icon.svg">
-    <link rel="stylesheet" href="styles.css?v=6">
-    <script defer src="app.js?v=12"></script>
+    <link rel="stylesheet" href="styles.css?v=9">
+    <script defer src="app.js?v=16"></script>
   </head>
   <body>
     <main class="app-shell">
@@ -34,20 +34,71 @@
           </div>
         </div>
 
+        <div class="streak-actions">
+          <button class="streak-button" id="streakButton" type="button">连开十局</button>
+          <button class="stats-open-button" id="statsButton" type="button">查看统计</button>
+          <button class="streak-exit-button" id="streakExitButton" type="button" hidden>退出挑战</button>
+          <span class="streak-progress" id="streakProgress" hidden>第 1 / 10 局</span>
+        </div>
+
         <div class="rule-strip" aria-label="规则">
           <div>每种颜色 1 只小牛</div>
           <div>每行每列均有且仅有 1 只小牛</div>
           <div>小牛不能相邻</div>
         </div>
+
       </section>
 
       <section class="board-wrap" aria-label="游戏棋盘">
         <div class="board" id="board" role="grid" aria-label="小牛数独棋盘"></div>
       </section>
 
+      <div class="stats-modal" id="statsModal" role="dialog" aria-modal="true" aria-labelledby="statsTitle" hidden>
+        <section class="stats-panel" id="statsPanel">
+          <div class="stats-header">
+            <div>
+              <span class="stats-eyebrow">十局统计</span>
+              <h2 id="statsTitle">挑战记录</h2>
+            </div>
+            <div class="stats-header-actions">
+              <div class="ip-badge">
+                <span>玩家 IP</span>
+                <strong id="playerIp">获取中…</strong>
+              </div>
+              <button class="stats-close-button" id="statsCloseButton" type="button" aria-label="关闭统计">×</button>
+            </div>
+          </div>
+          <div class="stats-history-bar">
+            <label for="historySelect">历史挑战</label>
+            <select id="historySelect" aria-label="选择当前 IP 的历史挑战">
+              <option value="">暂无历史记录</option>
+            </select>
+          </div>
+          <div class="stats-table-wrap">
+            <table class="stats-table">
+              <thead>
+                <tr>
+                  <th scope="col">局数</th>
+                  <th scope="col">难度</th>
+                  <th scope="col">结果</th>
+                  <th scope="col">剩余心数</th>
+                  <th scope="col">单局耗时</th>
+                </tr>
+              </thead>
+              <tbody id="statsBody">
+                <tr class="stats-empty-row">
+                  <td colspan="5">点击“连开十局”开始记录</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="stats-total" id="statsTotal">总耗时：--:--</div>
+        </section>
+      </div>
+
       <div class="victory-modal" id="victoryModal" role="dialog" aria-modal="true" aria-labelledby="victoryTitle" hidden>
         <div class="victory-card">
-          <div class="victory-kicker">全部找到了</div>
+          <div class="victory-kicker" id="victoryKicker">全部找到了</div>
           <h2 id="victoryTitle">Excellent</h2>
           <button class="victory-close-button" id="victoryCloseButton" type="button">继续</button>
         </div>
@@ -55,7 +106,7 @@
 
       <div class="victory-modal failure-modal" id="failureModal" role="dialog" aria-modal="true" aria-labelledby="failureTitle" hidden>
         <div class="victory-card failure-card">
-          <div class="victory-kicker">三颗心用完了</div>
+          <div class="victory-kicker" id="failureKicker">三颗心用完了</div>
           <h2 id="failureTitle">再试一次？</h2>
           <div class="failure-actions">
             <button class="victory-close-button" id="failureContinueButton" type="button">继续</button>
